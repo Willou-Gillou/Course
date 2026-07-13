@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>RunTrack Audio v0.5</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin:0; padding:0; height:100%; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:#111; color:#eee; }
+  #map { position:absolute; top:0; left:0; right:0; bottom:220px; }
+  #panel { position:absolute; bottom:0; left:0; right:0; height:220px; background:#1b1b1b; box-shadow:0 -2px 10px rgba(0,0,0,.5); padding:10px 14px; box-sizing:border-box; display:flex; flex-direction:column; gap:8px; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .stat { flex:1; text-align:center; }
+  .stat .val { font-size:22px; font-weight:700; }
+  .stat .lbl { font-size:11px; color:#9a9a9a; text-transform:uppercase; letter-spacing:.5px; }
+  button { border:none; border-radius:10px; padding:12px 16px; font-size:15px; font-weight:600; cursor:pointer; flex:1; }
+  #startBtn { background:#2ecc71; color:#04210f; }
+  #stopBtn { background:#e74c3c; color:#2a0505; }
+  #audioBtn { background:#3498db; color:#03203a; }
+  button:disabled { opacity:.4; cursor:default; }
+  #status { font-size:11px; color:#f1c40f; min-height:44px; text-align:center; line-height:1.4; }
+  .active { outline:2px solid #fff; }
+  #installBtn { display:none; }
+  .warn { color:#ff6b6b; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="panel">
+  <div class="row">
+    <div class="stat"><div class="val" id="dist">0.00</div><div class="lbl">km</div></div>
+    <div class="stat"><div class="val" id="time">00:00</div><div class="lbl">temps</div></div>
+    <div class="stat"><div class="val" id="pace">--:--</div><div class="lbl">min/km</div></div>
+    <div class="stat"><div class="val" id="speed">0.0</div><div class="lbl">km/h</div></div>
+  </div>
+  <div class="row">
+    <button id="startBtn">Démarrer</button>
+    <button id="stopBtn" disabled>Arrêter</button>
+    <button id="audioBtn">🔇 Audio OFF</button>
+  </div>
+  <div class="row">
+    <button id="installBtn">📲 Installer l'app (recommandé)</button>
+  </div>
+  <div id="status"></div>
+</div>
+
+<audio id="keepAliveAudio" loop playsinline preload="auto" style="display:none">
+  <source src="data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgB/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f3//uQxAADwAABpAAAACAAADSAAAAETEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==" type="audio/mp3">
+</audio>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+let map, pathLine, watchId = null, wakeLock = null;
+let positions = [];
+let startTime = null, timerInterval = null;
+let totalDistance = 0;
+let lastSpeechTime = 0;
+let audioEnabled = false;
+let deferredPrompt = null;
+let lastFixTime = 0;
+let backgroundGapCount = 0;
+
+const distEl = document.getElementById('dist');
+const timeEl = document.getElementById('time');
+const paceEl = document.getElementById('pace');
+const speedEl = document.getElementById('speed');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const audioBtn = document.getElementById('audioBtn');
+const installBtn = document.getElementById('installBtn');
+const statusEl = document.getElementById('status');
+const keepAliveAudio = document.getElementById('keepAliveAudio');
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+function initMap() {
+  map = L.map('map').setView([48.8566, 2.3522], 16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap'
+  }).addTo(map);
+  pathLine = L.polyline([], { color: '#2ecc71', weight: 5 }).addTo(map);
+}
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function formatTime(sec) {
+  const h = Math.floor(sec/3600);
+  const m = Math.floor((sec%3600)/60);
+  const s = Math.floor(sec%60);
+  if (h > 0) return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+
+function formatPace(minPerKm) {
+  if (!isFinite(minPerKm) || minPerKm <= 0) return '--:--';
+  const m = Math.floor(minPerKm);
+  const s = Math.round((minPerKm - m) * 60);
+  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  try {
+    if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'fr-FR';
+    u.rate = 1;
+    u.volume = 1;
+    window.speechSynthesis.speak(u);
+  } catch(e) { console.error(e); }
+}
+
+// Le vrai levier anti-suspension : maintenir un <audio> RÉELLEMENT en train
+// de jouer (pas silencieux à 0%, mais quasi-inaudible ~1%) est l'exception que
+// les OS mobiles accordent aux apps "média" (comme les apps de podcast) pour
+// continuer à s'exécuter écran éteint. Un volume à 0 ou un contexte Web Audio
+// seul ne déclenche PAS cette exception sur iOS.
+function startKeepAlive() {
+  keepAliveAudio.volume = 0.01;
+  const p = keepAliveAudio.play();
+  if (p) p.catch(() => {
+    statusEl.innerHTML = '<span class="warn">Le son n\'a pas pu démarrer automatiquement. Appuie une fois n\'importe où sur l\'écran puis relance.</span>';
+  });
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: 'RunTrack — Course en cours',
+      artist: 'Suivi GPS actif',
+      album: 'RunTrack Audio'
+    });
+    navigator.mediaSession.playbackState = 'playing';
+    navigator.mediaSession.setActionHandler('play', () => keepAliveAudio.play());
+    navigator.mediaSession.setActionHandler('pause', () => {});
+    navigator.mediaSession.setActionHandler('stop', () => {});
+  }
+}
+
+function stopKeepAlive() {
+  keepAliveAudio.pause();
+  keepAliveAudio.currentTime = 0;
+}
+
+// Récupération renforcée : si le navigateur suspend quand même le timer
+// principal, on recalcule dist/temps à partir de positions[] dès le retour,
+// évitant tout affichage figé ou incohérent après une longue coupure.
+function reconcileAfterResume() {
+  if (positions.length > 1 && startTime) {
+    const elapsedSec = (Date.now() - startTime) / 1000;
+    timeEl.textContent = formatTime(elapsedSec);
+  }
+}
+
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch (e) {
+    console.warn('WakeLock refusé/non disponible', e);
+  }
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'hidden' && watchId !== null) {
+    backgroundGapCount++;
+  }
+  if (document.visibilityState === 'visible' && watchId !== null) {
+    if (wakeLock === null) await requestWakeLock();
+    if (keepAliveAudio.paused) startKeepAlive();
+    if (window.speechSynthesis && window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+    reconcileAfterResume();
+    navigator.geolocation.clearWatch(watchId);
+    watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 15000
+    });
+  }
+});
+
+function updateUI(speedKmh) {
+  distEl.textContent = totalDistance.toFixed(2);
+  const elapsedSec = (Date.now() - startTime) / 1000;
+  timeEl.textContent = formatTime(elapsedSec);
+  speedEl.textContent = speedKmh.toFixed(1);
+  const pace = speedKmh > 0.5 ? 60 / speedKmh : NaN;
+  paceEl.textContent = formatPace(pace);
+
+  if (audioEnabled) {
+    const now = Date.now();
+    if (now - lastSpeechTime >= 30000) {
+      lastSpeechTime = now;
+      const paceText = isFinite(pace) ? formatPace(pace).replace(':', ' minutes ') + ' secondes' : 'en pause';
+      speak(`Vitesse ${speedKmh.toFixed(1)} kilomètres heure. Allure ${paceText} par kilomètre.`);
+    }
+  }
+}
+
+function onPosition(pos) {
+  lastFixTime = Date.now();
+  const { latitude, longitude, speed } = pos.coords;
+  const point = [latitude, longitude];
+
+  if (positions.length > 0) {
+    const [plat, plon] = positions[positions.length - 1];
+    const d = haversine(plat, plon, latitude, longitude);
+    if (d > 0.0005 && d < 0.3) totalDistance += d; // ignore aussi les sauts >300m (glitch GPS post-reprise)
+  }
+  positions.push(point);
+  pathLine.addLatLng(point);
+  map.panTo(point);
+
+  let speedKmh = 0;
+  if (speed !== null && speed >= 0) {
+    speedKmh = speed * 3.6;
+  } else if (positions.length > 1) {
+    const elapsedSec = (Date.now() - startTime) / 1000;
+    speedKmh = elapsedSec > 0 ? (totalDistance / (elapsedSec / 3600)) : 0;
+  }
+  updateUI(speedKmh);
+}
+
+function onError(err) {
+  statusEl.textContent = "Erreur GPS: " + err.message;
+}
+
+function monitorGpsHealth() {
+  setInterval(() => {
+    if (watchId !== null && lastFixTime > 0 && Date.now() - lastFixTime > 12000) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+        enableHighAccuracy: true,
+        maximumAge: 2000,
+        timeout: 15000
+      });
+    }
+    if (audioEnabled && keepAliveAudio.paused) {
+      startKeepAlive();
+    }
+    if (wakeLock === null && watchId !== null && document.visibilityState === 'visible') {
+      requestWakeLock();
+    }
+  }, 4000);
+}
+
+async function startRun() {
+  if (!navigator.geolocation) {
+    statusEl.textContent = "Géolocalisation non supportée.";
+    return;
+  }
+  positions = [];
+  totalDistance = 0;
+  startTime = Date.now();
+  lastSpeechTime = Date.now();
+  lastFixTime = Date.now();
+  backgroundGapCount = 0;
+  pathLine.setLatLngs([]);
+
+  watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+    enableHighAccuracy: true,
+    maximumAge: 2000,
+    timeout: 15000
+  });
+
+  await requestWakeLock();
+  startKeepAlive();
+  monitorGpsHealth();
+
+  timerInterval = setInterval(() => {
+    const elapsedSec = (Date.now() - startTime) / 1000;
+    timeEl.textContent = formatTime(elapsedSec);
+  }, 1000);
+
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  statusEl.innerHTML = isStandalone
+    ? "Suivi actif (app installée). Le son garde l'app éveillée écran éteint sur la plupart des Android. Sur iPhone, teste en marchant : si des coupures apparaissent, c'est une limite Apple, pas un bug."
+    : "<span class='warn'>Installe l'app (bouton ci-dessus) pour de bien meilleurs résultats écran éteint.</span>";
+}
+
+function stopRun() {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  if (timerInterval) clearInterval(timerInterval);
+  if (wakeLock) { wakeLock.release(); wakeLock = null; }
+  stopKeepAlive();
+  startBtn.disabled = false;
+  stopBtn.disabled = true;
+  const gapNote = backgroundGapCount > 0 ? ` (${backgroundGapCount} passage(s) en arrière-plan détecté(s))` : '';
+  statusEl.textContent = "Course arrêtée." + gapNote;
+}
+
+function toggleAudio() {
+  audioEnabled = !audioEnabled;
+  audioBtn.textContent = audioEnabled ? "🔊 Audio ON" : "🔇 Audio OFF";
+  audioBtn.classList.toggle('active', audioEnabled);
+  if (audioEnabled) {
+    if (watchId !== null) startKeepAlive();
+    speak("Mode audio activé.");
+    lastSpeechTime = Date.now();
+  } else {
+    window.speechSynthesis.cancel();
+  }
+}
+
+startBtn.addEventListener('click', startRun);
+stopBtn.addEventListener('click', stopRun);
+audioBtn.addEventListener('click', toggleAudio);
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  installBtn.style.display = 'block';
+});
+
+installBtn.addEventListener('click', async () => {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    installBtn.style.display = 'none';
+  } else {
+    statusEl.textContent = "Sur iPhone : bouton Partager de Safari puis 'Sur l'écran d'accueil'.";
+  }
+});
+
+window.addEventListener('appinstalled', () => {
+  installBtn.style.display = 'none';
+});
+
+initMap();
+
+if (!('wakeLock' in navigator)) {
+  statusEl.textContent = "Wake Lock non supporté ici. Installe l'app pour de meilleurs résultats.";
+}
+</script>
+</body>
+</html>
