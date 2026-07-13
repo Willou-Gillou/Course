@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>RunTrack Audio v0.6</title>
+<title>RunTrack Audio v0.7</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -47,7 +47,7 @@ button{border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:
   <div class="small">Astuce: sur iPhone, même en PWA, le GPS/audio écran éteint reste limité par iOS. Sur Android, cette version tient mieux en arrière-plan mais ne peut pas contourner toutes les restrictions du système.</div>
 </div>
 
-<audio id="beepAudio" playsinline preload="auto" style="display:none"></audio>
+<audio id="beepAudio" loop playsinline preload="auto" style="display:none"></audio>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -78,29 +78,47 @@ function formatTime(sec){ const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/
 function formatPace(minPerKm){ if(!isFinite(minPerKm)||minPerKm<=0)return '--:--'; let m=Math.floor(minPerKm), s=Math.round((minPerKm-m)*60); if(s===60){m++;s=0} return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
 function speak(text){ if(!('speechSynthesis' in window) || !audioEnabled) return; try{ window.speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text); u.lang='fr-FR'; u.rate=1; u.pitch=1; u.volume=1; window.speechSynthesis.speak(u);}catch(e){} }
 
-function createBeepWavDataUrl(){
-  const sr=22050, duration=0.22, samples=Math.floor(sr*duration), freq=880;
+function createLoopTone(){
+  // Ton continu très bas volume, boucle SANS interruption pendant toute la course.
+  // C'est la lecture ININTERROMPUE (pas une impulsion play/pause) qui fait que
+  // l'OS classe l'app comme "lecteur média actif" et lui laisse tourner le
+  // JavaScript, le GPS et la synthèse vocale même écran éteint.
+  const sr=22050, duration=1.0, samples=Math.floor(sr*duration), freq=140;
   const buffer=new ArrayBuffer(44 + samples*2);
   const view=new DataView(buffer);
   function wstr(off,str){ for(let i=0;i<str.length;i++) view.setUint8(off+i,str.charCodeAt(i)); }
   wstr(0,'RIFF'); view.setUint32(4,36+samples*2,true); wstr(8,'WAVE'); wstr(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true); view.setUint32(24,sr,true); view.setUint32(28,sr*2,true); view.setUint16(32,2,true); view.setUint16(34,16,true); wstr(36,'data'); view.setUint32(40,samples*2,true);
   for(let i=0;i<samples;i++){
-    const env=i<400?i/400:(samples-i<1200?(samples-i)/1200:1);
-    const sample=Math.sin(2*Math.PI*freq*i/sr)*0.18*Math.max(0,env);
+    const sample=Math.sin(2*Math.PI*freq*i/sr)*0.05;
     view.setInt16(44+i*2, Math.max(-1,Math.min(1,sample))*32767, true);
   }
   const bytes=new Uint8Array(buffer); let binary=''; for(let i=0;i<bytes.byteLength;i++) binary += String.fromCharCode(bytes[i]);
   return 'data:audio/wav;base64,' + btoa(binary);
 }
-beepAudio.src = createBeepWavDataUrl();
+beepAudio.src = createLoopTone();
+beepAudio.volume = 0.04;
 
-function pulseKeepAlive(){
-  if(!running) return;
-  try{
-    beepAudio.currentTime = 0;
-    beepAudio.volume = 0.03;
-    beepAudio.play().then(()=>{ setTimeout(()=>{ try{ beepAudio.pause(); beepAudio.currentTime=0; }catch(e){} }, 260); }).catch(()=>{});
-  }catch(e){}
+function startContinuousAudio(){
+  beepAudio.loop = true;
+  const p = beepAudio.play();
+  if(p) p.catch(()=>{
+    statusEl.innerHTML = '<span class="warn">Le son n\'a pas pu démarrer automatiquement. Touche une fois l\'écran puis relance Démarrer.</span>';
+  });
+  if('mediaSession' in navigator){
+    navigator.mediaSession.metadata = new MediaMetadata({ title:'RunTrack — course en cours', artist:'Suivi GPS + audio actif', album:'RunTrack' });
+    navigator.mediaSession.playbackState = 'playing';
+    navigator.mediaSession.setActionHandler('play', ()=>beepAudio.play());
+    navigator.mediaSession.setActionHandler('pause', ()=>{ beepAudio.play(); });
+    navigator.mediaSession.setActionHandler('stop', ()=>{});
+  }
+}
+function stopContinuousAudio(){
+  try{ beepAudio.pause(); beepAudio.currentTime=0; }catch(e){}
+}
+function ensureAudioPlaying(){
+  if(running && beepAudio.paused){ beepAudio.play().catch(()=>{}); }
+}
+
 }
 
 async function requestWakeLock(){
@@ -124,12 +142,13 @@ function updateUI(speedKmh){
       lastSpeechTime=now;
       const p=isFinite(pace)?formatPace(pace):'--:--';
       speak(`Temps ${formatTime(elapsedSec)}. Vitesse ${(speedKmh||0).toFixed(1)} kilomètres heure. Allure ${p.replace(':',' minutes ')} secondes par kilomètre.`);
-      pulseKeepAlive();
+      ensureAudioPlaying();
     }
   }
 }
 function onPosition(pos){
   lastFixTime=Date.now();
+  ensureAudioPlaying();
   const {latitude, longitude, speed} = pos.coords;
   const point=[latitude,longitude];
   if(positions.length){
@@ -170,7 +189,7 @@ function startMonitors(){
 
   audioKeepAliveInterval=setInterval(()=>{
     if(!running) return;
-    if(document.visibilityState==='hidden') pulseKeepAlive();
+    ensureAudioPlaying();
     if(audioEnabled && window.speechSynthesis && window.speechSynthesis.paused) window.speechSynthesis.resume();
   },12000);
 }
@@ -180,7 +199,7 @@ async function startRun(){
   positions=[]; totalDistance=0; startTime=Date.now(); lastSpeechTime=Date.now(); lastFixTime=Date.now(); backgroundLossDetected=false;
   pathLine.setLatLngs([]); running=true;
   await requestWakeLock();
-  pulseKeepAlive();
+  startContinuousAudio();
   startGpsWatch();
   startMonitors();
   startBtn.disabled=true; stopBtn.disabled=false;
@@ -192,7 +211,7 @@ function stopRun(){
   running=false; clearGpsWatch();
   if(timerInterval) clearInterval(timerInterval); if(gpsMonitorInterval) clearInterval(gpsMonitorInterval); if(audioKeepAliveInterval) clearInterval(audioKeepAliveInterval);
   if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock=null; }
-  try{ beepAudio.pause(); beepAudio.currentTime=0; }catch(e){}
+  stopContinuousAudio();
   window.speechSynthesis.cancel();
   startBtn.disabled=false; stopBtn.disabled=true;
   statusEl.textContent = backgroundLossDetected ? 'Course arrêtée. Des suspensions arrière-plan ont été détectées puis relancées.' : 'Course arrêtée.';
@@ -201,7 +220,7 @@ function toggleAudio(){
   audioEnabled=!audioEnabled;
   audioBtn.textContent = audioEnabled ? '🔊 Audio ON' : '🔇 Audio OFF';
   audioBtn.classList.toggle('active', audioEnabled);
-  if(audioEnabled){ pulseKeepAlive(); speak('Mode audio activé.'); lastSpeechTime=Date.now(); }
+  if(audioEnabled){ ensureAudioPlaying(); speak('Mode audio activé.'); lastSpeechTime=Date.now(); }
   else window.speechSynthesis.cancel();
 }
 
@@ -216,7 +235,7 @@ document.addEventListener('visibilitychange', async ()=>{
     startGpsWatch();
     if(audioEnabled && window.speechSynthesis && window.speechSynthesis.paused) window.speechSynthesis.resume();
   } else {
-    pulseKeepAlive();
+    ensureAudioPlaying();
   }
 });
 
