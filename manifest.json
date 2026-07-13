@@ -1,7 +1,7 @@
 {
-  "name": "RunTrack Audio v0.5",
+  "name": "RunTrack Audio v0.6",
   "short_name": "RunTrack",
-  "description": "Suivi de course à pied avec carte et annonces vocales",
+  "description": "Suivi running GPS avec annonces vocales",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -9,15 +9,7 @@
   "background_color": "#111111",
   "theme_color": "#111111",
   "icons": [
-    {
-      "src": "icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}
   ]
 }

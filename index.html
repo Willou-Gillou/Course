@@ -4,33 +4,30 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#111111">
-<title>RunTrack Audio v0.5</title>
+<title>RunTrack Audio v0.6</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon-192.png">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-  html, body { margin:0; padding:0; height:100%; font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:#111; color:#eee; }
-  #map { position:absolute; top:0; left:0; right:0; bottom:220px; }
-  #panel { position:absolute; bottom:0; left:0; right:0; height:220px; background:#1b1b1b; box-shadow:0 -2px 10px rgba(0,0,0,.5); padding:10px 14px; box-sizing:border-box; display:flex; flex-direction:column; gap:8px; }
-  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
-  .stat { flex:1; text-align:center; }
-  .stat .val { font-size:22px; font-weight:700; }
-  .stat .lbl { font-size:11px; color:#9a9a9a; text-transform:uppercase; letter-spacing:.5px; }
-  button { border:none; border-radius:10px; padding:12px 16px; font-size:15px; font-weight:600; cursor:pointer; flex:1; }
-  #startBtn { background:#2ecc71; color:#04210f; }
-  #stopBtn { background:#e74c3c; color:#2a0505; }
-  #audioBtn { background:#3498db; color:#03203a; }
-  button:disabled { opacity:.4; cursor:default; }
-  #status { font-size:11px; color:#f1c40f; min-height:44px; text-align:center; line-height:1.4; }
-  .active { outline:2px solid #fff; }
-  #installBtn { display:none; }
-  .warn { color:#ff6b6b; }
+:root{
+  --bg:#111111; --panel:#1c1c1c; --panel2:#232323; --text:#f2f2f2; --muted:#aaaaaa;
+  --green:#2ecc71; --blue:#3498db; --red:#e74c3c; --yellow:#f1c40f; --warn:#ff6b6b;
+  --r:14px;
+}
+*{box-sizing:border-box} html,body{margin:0;height:100%;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+body{min-height:100dvh}
+#map{position:absolute;top:0;left:0;right:0;bottom:238px}
+#panel{position:absolute;left:0;right:0;bottom:0;height:238px;background:linear-gradient(180deg,var(--panel),var(--panel2));padding:10px 12px;display:flex;flex-direction:column;gap:8px;box-shadow:0 -8px 30px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;align-items:center}.stat{flex:1;text-align:center;background:rgba(255,255,255,.03);padding:8px 4px;border-radius:12px}.val{font-size:22px;font-weight:800}.lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+button{border:0;border-radius:12px;padding:12px 14px;font-size:15px;font-weight:700;cursor:pointer;flex:1;min-height:46px}.btn-start{background:var(--green);color:#062012}.btn-stop{background:var(--red);color:#2a0705}.btn-audio{background:var(--blue);color:#062033}.active{outline:2px solid #fff}button:disabled{opacity:.45;cursor:default}
+#status{min-height:42px;font-size:12px;line-height:1.35;color:var(--yellow);text-align:center}
+.small{font-size:11px;color:var(--muted)}
+.badge{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,.06);padding:7px 10px;border-radius:999px;font-size:12px}
+.warn{color:var(--warn)}
 </style>
 </head>
 <body>
-
 <div id="map"></div>
-
 <div id="panel">
   <div class="row">
     <div class="stat"><div class="val" id="dist">0.00</div><div class="lbl">km</div></div>
@@ -39,321 +36,192 @@
     <div class="stat"><div class="val" id="speed">0.0</div><div class="lbl">km/h</div></div>
   </div>
   <div class="row">
-    <button id="startBtn">Démarrer</button>
-    <button id="stopBtn" disabled>Arrêter</button>
-    <button id="audioBtn">🔇 Audio OFF</button>
+    <button id="startBtn" class="btn-start">Démarrer</button>
+    <button id="stopBtn" class="btn-stop" disabled>Arrêter</button>
+    <button id="audioBtn" class="btn-audio">🔇 Audio OFF</button>
   </div>
-  <div class="row">
-    <button id="installBtn">📲 Installer l'app (recommandé)</button>
+  <div class="row" style="justify-content:center">
+    <div class="badge" id="modeBadge">Mode: Web/PWA</div>
   </div>
   <div id="status"></div>
+  <div class="small">Astuce: sur iPhone, même en PWA, le GPS/audio écran éteint reste limité par iOS. Sur Android, cette version tient mieux en arrière-plan mais ne peut pas contourner toutes les restrictions du système.</div>
 </div>
 
-<audio id="keepAliveAudio" loop playsinline preload="auto" style="display:none">
-  <source src="data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgB/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f3//uQxAADwAABpAAAACAAADSAAAAETEFNRTMuMTAwVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVQ==" type="audio/mp3">
-</audio>
+<audio id="beepAudio" playsinline preload="auto" style="display:none"></audio>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-let map, pathLine, watchId = null, wakeLock = null;
-let positions = [];
-let startTime = null, timerInterval = null;
-let totalDistance = 0;
-let lastSpeechTime = 0;
-let audioEnabled = false;
-let deferredPrompt = null;
-let lastFixTime = 0;
-let backgroundGapCount = 0;
+let map, pathLine, watchId=null, wakeLock=null, running=false;
+let positions=[], totalDistance=0, startTime=0, lastSpeechTime=0, lastFixTime=0;
+let timerInterval=null, gpsMonitorInterval=null, audioKeepAliveInterval=null;
+let audioEnabled=false, backgroundLossDetected=false;
 
-const distEl = document.getElementById('dist');
-const timeEl = document.getElementById('time');
-const paceEl = document.getElementById('pace');
-const speedEl = document.getElementById('speed');
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const audioBtn = document.getElementById('audioBtn');
-const installBtn = document.getElementById('installBtn');
-const statusEl = document.getElementById('status');
-const keepAliveAudio = document.getElementById('keepAliveAudio');
+const distEl=document.getElementById('dist'), timeEl=document.getElementById('time'), paceEl=document.getElementById('pace'), speedEl=document.getElementById('speed');
+const startBtn=document.getElementById('startBtn'), stopBtn=document.getElementById('stopBtn'), audioBtn=document.getElementById('audioBtn');
+const statusEl=document.getElementById('status'), modeBadge=document.getElementById('modeBadge');
+const beepAudio=document.getElementById('beepAudio');
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
-  });
+const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+modeBadge.textContent = isStandalone ? 'Mode: App installée' : 'Mode: Web/PWA';
+
+function initMap(){
+  map=L.map('map',{zoomControl:true}).setView([48.8566,2.3522],16);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'&copy; OpenStreetMap'}).addTo(map);
+  pathLine=L.polyline([],{color:'#2ecc71',weight:5}).addTo(map);
 }
-
-function initMap() {
-  map = L.map('map').setView([48.8566, 2.3522], 16);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; OpenStreetMap'
-  }).addTo(map);
-  pathLine = L.polyline([], { color: '#2ecc71', weight: 5 }).addTo(map);
+function haversine(lat1, lon1, lat2, lon2){
+  const R=6371, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
 }
+function formatTime(sec){ const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=Math.floor(sec%60); return h>0?`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
+function formatPace(minPerKm){ if(!isFinite(minPerKm)||minPerKm<=0)return '--:--'; let m=Math.floor(minPerKm), s=Math.round((minPerKm-m)*60); if(s===60){m++;s=0} return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`; }
+function speak(text){ if(!('speechSynthesis' in window) || !audioEnabled) return; try{ window.speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text); u.lang='fr-FR'; u.rate=1; u.pitch=1; u.volume=1; window.speechSynthesis.speak(u);}catch(e){} }
 
-function haversine(lat1, lon1, lat2, lon2) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-}
-
-function formatTime(sec) {
-  const h = Math.floor(sec/3600);
-  const m = Math.floor((sec%3600)/60);
-  const s = Math.floor(sec%60);
-  if (h > 0) return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
-  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
-}
-
-function formatPace(minPerKm) {
-  if (!isFinite(minPerKm) || minPerKm <= 0) return '--:--';
-  const m = Math.floor(minPerKm);
-  const s = Math.round((minPerKm - m) * 60);
-  return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
-}
-
-function speak(text) {
-  if (!('speechSynthesis' in window)) return;
-  try {
-    if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'fr-FR';
-    u.rate = 1;
-    u.volume = 1;
-    window.speechSynthesis.speak(u);
-  } catch(e) { console.error(e); }
-}
-
-// Le vrai levier anti-suspension : maintenir un <audio> RÉELLEMENT en train
-// de jouer (pas silencieux à 0%, mais quasi-inaudible ~1%) est l'exception que
-// les OS mobiles accordent aux apps "média" (comme les apps de podcast) pour
-// continuer à s'exécuter écran éteint. Un volume à 0 ou un contexte Web Audio
-// seul ne déclenche PAS cette exception sur iOS.
-function startKeepAlive() {
-  keepAliveAudio.volume = 0.01;
-  const p = keepAliveAudio.play();
-  if (p) p.catch(() => {
-    statusEl.innerHTML = '<span class="warn">Le son n\'a pas pu démarrer automatiquement. Appuie une fois n\'importe où sur l\'écran puis relance.</span>';
-  });
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: 'RunTrack — Course en cours',
-      artist: 'Suivi GPS actif',
-      album: 'RunTrack Audio'
-    });
-    navigator.mediaSession.playbackState = 'playing';
-    navigator.mediaSession.setActionHandler('play', () => keepAliveAudio.play());
-    navigator.mediaSession.setActionHandler('pause', () => {});
-    navigator.mediaSession.setActionHandler('stop', () => {});
+function createBeepWavDataUrl(){
+  const sr=22050, duration=0.22, samples=Math.floor(sr*duration), freq=880;
+  const buffer=new ArrayBuffer(44 + samples*2);
+  const view=new DataView(buffer);
+  function wstr(off,str){ for(let i=0;i<str.length;i++) view.setUint8(off+i,str.charCodeAt(i)); }
+  wstr(0,'RIFF'); view.setUint32(4,36+samples*2,true); wstr(8,'WAVE'); wstr(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,1,true); view.setUint32(24,sr,true); view.setUint32(28,sr*2,true); view.setUint16(32,2,true); view.setUint16(34,16,true); wstr(36,'data'); view.setUint32(40,samples*2,true);
+  for(let i=0;i<samples;i++){
+    const env=i<400?i/400:(samples-i<1200?(samples-i)/1200:1);
+    const sample=Math.sin(2*Math.PI*freq*i/sr)*0.18*Math.max(0,env);
+    view.setInt16(44+i*2, Math.max(-1,Math.min(1,sample))*32767, true);
   }
+  const bytes=new Uint8Array(buffer); let binary=''; for(let i=0;i<bytes.byteLength;i++) binary += String.fromCharCode(bytes[i]);
+  return 'data:audio/wav;base64,' + btoa(binary);
+}
+beepAudio.src = createBeepWavDataUrl();
+
+function pulseKeepAlive(){
+  if(!running) return;
+  try{
+    beepAudio.currentTime = 0;
+    beepAudio.volume = 0.03;
+    beepAudio.play().then(()=>{ setTimeout(()=>{ try{ beepAudio.pause(); beepAudio.currentTime=0; }catch(e){} }, 260); }).catch(()=>{});
+  }catch(e){}
 }
 
-function stopKeepAlive() {
-  keepAliveAudio.pause();
-  keepAliveAudio.currentTime = 0;
+async function requestWakeLock(){
+  try{ if('wakeLock' in navigator){ wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', ()=>{wakeLock=null;}); } }catch(e){}
 }
-
-// Récupération renforcée : si le navigateur suspend quand même le timer
-// principal, on recalcule dist/temps à partir de positions[] dès le retour,
-// évitant tout affichage figé ou incohérent après une longue coupure.
-function reconcileAfterResume() {
-  if (positions.length > 1 && startTime) {
-    const elapsedSec = (Date.now() - startTime) / 1000;
-    timeEl.textContent = formatTime(elapsedSec);
-  }
+function clearGpsWatch(){ if(watchId!==null){ navigator.geolocation.clearWatch(watchId); watchId=null; } }
+function startGpsWatch(){
+  clearGpsWatch();
+  watchId=navigator.geolocation.watchPosition(onPosition, onError, { enableHighAccuracy:true, maximumAge:1000, timeout:15000 });
 }
-
-async function requestWakeLock() {
-  try {
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => { wakeLock = null; });
-    }
-  } catch (e) {
-    console.warn('WakeLock refusé/non disponible', e);
-  }
-}
-
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'hidden' && watchId !== null) {
-    backgroundGapCount++;
-  }
-  if (document.visibilityState === 'visible' && watchId !== null) {
-    if (wakeLock === null) await requestWakeLock();
-    if (keepAliveAudio.paused) startKeepAlive();
-    if (window.speechSynthesis && window.speechSynthesis.paused) {
-      window.speechSynthesis.resume();
-    }
-    reconcileAfterResume();
-    navigator.geolocation.clearWatch(watchId);
-    watchId = navigator.geolocation.watchPosition(onPosition, onError, {
-      enableHighAccuracy: true,
-      maximumAge: 2000,
-      timeout: 15000
-    });
-  }
-});
-
-function updateUI(speedKmh) {
-  distEl.textContent = totalDistance.toFixed(2);
-  const elapsedSec = (Date.now() - startTime) / 1000;
-  timeEl.textContent = formatTime(elapsedSec);
-  speedEl.textContent = speedKmh.toFixed(1);
-  const pace = speedKmh > 0.5 ? 60 / speedKmh : NaN;
-  paceEl.textContent = formatPace(pace);
-
-  if (audioEnabled) {
-    const now = Date.now();
-    if (now - lastSpeechTime >= 30000) {
-      lastSpeechTime = now;
-      const paceText = isFinite(pace) ? formatPace(pace).replace(':', ' minutes ') + ' secondes' : 'en pause';
-      speak(`Vitesse ${speedKmh.toFixed(1)} kilomètres heure. Allure ${paceText} par kilomètre.`);
+function updateUI(speedKmh){
+  distEl.textContent=totalDistance.toFixed(2);
+  const elapsedSec=(Date.now()-startTime)/1000;
+  timeEl.textContent=formatTime(elapsedSec);
+  speedEl.textContent=(speedKmh||0).toFixed(1);
+  const pace=(speedKmh>0.5)?(60/speedKmh):NaN;
+  paceEl.textContent=formatPace(pace);
+  if(audioEnabled){
+    const now=Date.now();
+    if(now-lastSpeechTime>=30000){
+      lastSpeechTime=now;
+      const p=isFinite(pace)?formatPace(pace):'--:--';
+      speak(`Temps ${formatTime(elapsedSec)}. Vitesse ${(speedKmh||0).toFixed(1)} kilomètres heure. Allure ${p.replace(':',' minutes ')} secondes par kilomètre.`);
+      pulseKeepAlive();
     }
   }
 }
-
-function onPosition(pos) {
-  lastFixTime = Date.now();
-  const { latitude, longitude, speed } = pos.coords;
-  const point = [latitude, longitude];
-
-  if (positions.length > 0) {
-    const [plat, plon] = positions[positions.length - 1];
-    const d = haversine(plat, plon, latitude, longitude);
-    if (d > 0.0005 && d < 0.3) totalDistance += d; // ignore aussi les sauts >300m (glitch GPS post-reprise)
+function onPosition(pos){
+  lastFixTime=Date.now();
+  const {latitude, longitude, speed} = pos.coords;
+  const point=[latitude,longitude];
+  if(positions.length){
+    const [plat,plon]=positions[positions.length-1];
+    const d=haversine(plat,plon,latitude,longitude);
+    if(d>0.0005 && d<0.3) totalDistance += d;
   }
   positions.push(point);
   pathLine.addLatLng(point);
   map.panTo(point);
-
-  let speedKmh = 0;
-  if (speed !== null && speed >= 0) {
-    speedKmh = speed * 3.6;
-  } else if (positions.length > 1) {
-    const elapsedSec = (Date.now() - startTime) / 1000;
-    speedKmh = elapsedSec > 0 ? (totalDistance / (elapsedSec / 3600)) : 0;
-  }
+  let speedKmh=0;
+  if(speed!==null && speed>=0) speedKmh=speed*3.6;
+  else if(positions.length>1){ const elapsedSec=(Date.now()-startTime)/1000; speedKmh=elapsedSec>0?(totalDistance/(elapsedSec/3600)):0; }
   updateUI(speedKmh);
 }
+function onError(err){ statusEl.textContent = 'Erreur GPS: ' + err.message; }
 
-function onError(err) {
-  statusEl.textContent = "Erreur GPS: " + err.message;
+function startMonitors(){
+  if(timerInterval) clearInterval(timerInterval);
+  if(gpsMonitorInterval) clearInterval(gpsMonitorInterval);
+  if(audioKeepAliveInterval) clearInterval(audioKeepAliveInterval);
+
+  timerInterval=setInterval(()=>{
+    if(!running) return;
+    const elapsedSec=(Date.now()-startTime)/1000;
+    timeEl.textContent=formatTime(elapsedSec);
+  },1000);
+
+  gpsMonitorInterval=setInterval(()=>{
+    if(!running) return;
+    if(lastFixTime && Date.now()-lastFixTime>15000){
+      backgroundLossDetected = true;
+      startGpsWatch();
+      statusEl.innerHTML = '<span class="warn">GPS relancé automatiquement après suspension.</span>';
+    }
+    if(document.visibilityState==='visible' && !wakeLock) requestWakeLock();
+  },5000);
+
+  audioKeepAliveInterval=setInterval(()=>{
+    if(!running) return;
+    if(document.visibilityState==='hidden') pulseKeepAlive();
+    if(audioEnabled && window.speechSynthesis && window.speechSynthesis.paused) window.speechSynthesis.resume();
+  },12000);
 }
 
-function monitorGpsHealth() {
-  setInterval(() => {
-    if (watchId !== null && lastFixTime > 0 && Date.now() - lastFixTime > 12000) {
-      navigator.geolocation.clearWatch(watchId);
-      watchId = navigator.geolocation.watchPosition(onPosition, onError, {
-        enableHighAccuracy: true,
-        maximumAge: 2000,
-        timeout: 15000
-      });
-    }
-    if (audioEnabled && keepAliveAudio.paused) {
-      startKeepAlive();
-    }
-    if (wakeLock === null && watchId !== null && document.visibilityState === 'visible') {
-      requestWakeLock();
-    }
-  }, 4000);
-}
-
-async function startRun() {
-  if (!navigator.geolocation) {
-    statusEl.textContent = "Géolocalisation non supportée.";
-    return;
-  }
-  positions = [];
-  totalDistance = 0;
-  startTime = Date.now();
-  lastSpeechTime = Date.now();
-  lastFixTime = Date.now();
-  backgroundGapCount = 0;
-  pathLine.setLatLngs([]);
-
-  watchId = navigator.geolocation.watchPosition(onPosition, onError, {
-    enableHighAccuracy: true,
-    maximumAge: 2000,
-    timeout: 15000
-  });
-
+async function startRun(){
+  if(!navigator.geolocation){ statusEl.textContent='Géolocalisation non supportée.'; return; }
+  positions=[]; totalDistance=0; startTime=Date.now(); lastSpeechTime=Date.now(); lastFixTime=Date.now(); backgroundLossDetected=false;
+  pathLine.setLatLngs([]); running=true;
   await requestWakeLock();
-  startKeepAlive();
-  monitorGpsHealth();
-
-  timerInterval = setInterval(() => {
-    const elapsedSec = (Date.now() - startTime) / 1000;
-    timeEl.textContent = formatTime(elapsedSec);
-  }, 1000);
-
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+  pulseKeepAlive();
+  startGpsWatch();
+  startMonitors();
+  startBtn.disabled=true; stopBtn.disabled=false;
   statusEl.innerHTML = isStandalone
-    ? "Suivi actif (app installée). Le son garde l'app éveillée écran éteint sur la plupart des Android. Sur iPhone, teste en marchant : si des coupures apparaissent, c'est une limite Apple, pas un bug."
-    : "<span class='warn'>Installe l'app (bouton ci-dessus) pour de bien meilleurs résultats écran éteint.</span>";
+    ? 'Suivi démarré. Cette version améliore la tenue Android écran éteint, mais sur iPhone/iOS le son et le GPS peuvent encore être suspendus par le système.'
+    : '<span class="warn">Ouvre idéalement la version installée depuis l’écran d’accueil.</span>';
 }
-
-function stopRun() {
-  if (watchId !== null) {
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
-  }
-  if (timerInterval) clearInterval(timerInterval);
-  if (wakeLock) { wakeLock.release(); wakeLock = null; }
-  stopKeepAlive();
-  startBtn.disabled = false;
-  stopBtn.disabled = true;
-  const gapNote = backgroundGapCount > 0 ? ` (${backgroundGapCount} passage(s) en arrière-plan détecté(s))` : '';
-  statusEl.textContent = "Course arrêtée." + gapNote;
+function stopRun(){
+  running=false; clearGpsWatch();
+  if(timerInterval) clearInterval(timerInterval); if(gpsMonitorInterval) clearInterval(gpsMonitorInterval); if(audioKeepAliveInterval) clearInterval(audioKeepAliveInterval);
+  if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock=null; }
+  try{ beepAudio.pause(); beepAudio.currentTime=0; }catch(e){}
+  window.speechSynthesis.cancel();
+  startBtn.disabled=false; stopBtn.disabled=true;
+  statusEl.textContent = backgroundLossDetected ? 'Course arrêtée. Des suspensions arrière-plan ont été détectées puis relancées.' : 'Course arrêtée.';
 }
-
-function toggleAudio() {
-  audioEnabled = !audioEnabled;
-  audioBtn.textContent = audioEnabled ? "🔊 Audio ON" : "🔇 Audio OFF";
+function toggleAudio(){
+  audioEnabled=!audioEnabled;
+  audioBtn.textContent = audioEnabled ? '🔊 Audio ON' : '🔇 Audio OFF';
   audioBtn.classList.toggle('active', audioEnabled);
-  if (audioEnabled) {
-    if (watchId !== null) startKeepAlive();
-    speak("Mode audio activé.");
-    lastSpeechTime = Date.now();
-  } else {
-    window.speechSynthesis.cancel();
-  }
+  if(audioEnabled){ pulseKeepAlive(); speak('Mode audio activé.'); lastSpeechTime=Date.now(); }
+  else window.speechSynthesis.cancel();
 }
 
 startBtn.addEventListener('click', startRun);
 stopBtn.addEventListener('click', stopRun);
 audioBtn.addEventListener('click', toggleAudio);
 
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  installBtn.style.display = 'block';
-});
-
-installBtn.addEventListener('click', async () => {
-  if (deferredPrompt) {
-    deferredPrompt.prompt();
-    await deferredPrompt.userChoice;
-    deferredPrompt = null;
-    installBtn.style.display = 'none';
+document.addEventListener('visibilitychange', async ()=>{
+  if(!running) return;
+  if(document.visibilityState==='visible'){
+    if(!wakeLock) await requestWakeLock();
+    startGpsWatch();
+    if(audioEnabled && window.speechSynthesis && window.speechSynthesis.paused) window.speechSynthesis.resume();
   } else {
-    statusEl.textContent = "Sur iPhone : bouton Partager de Safari puis 'Sur l'écran d'accueil'.";
+    pulseKeepAlive();
   }
 });
 
-window.addEventListener('appinstalled', () => {
-  installBtn.style.display = 'none';
-});
-
+if('serviceWorker' in navigator){ window.addEventListener('load', ()=>navigator.serviceWorker.register('sw.js').catch(()=>{})); }
 initMap();
-
-if (!('wakeLock' in navigator)) {
-  statusEl.textContent = "Wake Lock non supporté ici. Installe l'app pour de meilleurs résultats.";
-}
 </script>
 </body>
 </html>
